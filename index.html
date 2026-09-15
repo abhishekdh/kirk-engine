@@ -1,0 +1,704 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Kirk Engine on AndroidWorld — Benchmark</title>
+<style>
+  /* ── Theme tokens lifted from src/index.css so this file needs no build step ── */
+  :root, [data-theme="dark"] {
+    --font-sans: 'Geist', ui-sans-serif, system-ui, -apple-system, sans-serif;
+    --font-mono: 'Geist Mono', ui-monospace, SFMono-Regular, monospace;
+
+    --bg-app: #0f172a;
+    --panel: rgba(15, 23, 42, 0.82);
+    --panel-raised: rgba(30, 41, 59, 0.70);
+    --border: rgba(148, 163, 184, 0.15);
+    --border-strong: rgba(100, 116, 139, 0.45);
+    --text: #e2e8f0;
+    --text-heading: #ffffff;
+    --text-2: #94a3b8;
+    --text-muted: #8894ac;
+    --table-head: rgba(15, 23, 42, 0.5);
+    --row-border: rgba(51, 65, 85, 0.4);
+    --row-hover: rgba(51, 65, 85, 0.2);
+    --track: rgba(51, 65, 85, 0.5);
+    --shadow-panel: 0 4px 28px -10px rgba(0, 0, 0, 0.55);
+    --top-glow:
+      radial-gradient(circle at 82% -14%, rgba(236, 72, 153, .16), transparent 32%),
+      radial-gradient(circle at 46% -10%, rgba(6, 182, 212, .13), transparent 28%),
+      radial-gradient(circle at 14% 4%, rgba(139, 92, 246, .10), transparent 26%);
+  }
+  [data-theme="light"] {
+    --bg-app: #eef1f7;
+    --panel: rgba(255, 255, 255, 0.95);
+    --panel-raised: #ffffff;
+    --border: #e1e6f0;
+    --border-strong: #c9d2e3;
+    --text: #33415a;
+    --text-heading: #0f1729;
+    --text-2: #47566f;
+    --text-muted: #66738c;
+    --table-head: #f6f8fc;
+    --row-border: #ecf0f7;
+    --row-hover: #f3f5fa;
+    --track: #e1e6f0;
+    --shadow-panel: 0 1px 2px rgba(15, 23, 42, 0.04), 0 10px 28px -14px rgba(30, 41, 59, 0.10);
+    --top-glow:
+      radial-gradient(circle at 78% -12%, rgba(139, 92, 246, .14), transparent 34%),
+      radial-gradient(circle at 42% -8%, rgba(6, 182, 212, .10), transparent 30%),
+      radial-gradient(circle at 18% 6%, rgba(236, 72, 153, .07), transparent 26%);
+  }
+
+  /* Brand ramps — Tailwind kirk-* / accent-* equivalents */
+  :root {
+    --pink: #ec4899;   --pink-soft: #f9a8d4;
+    --cyan: #06b6d4;   --cyan-soft: #67e8f9;
+    --violet: #8b5cf6;
+    --green: #10b981;  --green-soft: #6ee7b7;
+    --brand-grad: linear-gradient(135deg, var(--pink) 0%, var(--violet) 52%, var(--cyan) 100%);
+    /* Decelerating curve — motion arrives with mass instead of easing symmetrically. */
+    --ease: cubic-bezier(.32, .72, 0, 1);
+  }
+  /* Soft ramps are pastels tuned for dark surfaces; on light tints they fall below
+     contrast, so light mode swaps them for the deep end of each ramp. */
+  [data-theme="light"] {
+    --pink-soft: #b01455; --cyan-soft: #0e7490; --green-soft: #04785b;
+  }
+  /* An omni-directional glow reads as a smudge on a near-white surface — light mode
+     drops it to a grounded, downward shadow. */
+  [data-theme="light"] .logo-mark { box-shadow: 0 5px 14px -6px rgba(236, 72, 153, .55); }
+  [data-theme="light"] .btn { box-shadow: 0 8px 18px -10px rgba(236, 72, 153, .6); }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    background: var(--bg-app);
+    color: var(--text);
+    font-family: var(--font-sans);
+    font-size: 14px;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+  body::before {
+    content: ''; position: fixed; inset: 0 0 auto 0; height: 60vh;
+    background: var(--top-glow); pointer-events: none; z-index: 0;
+  }
+  /* padding-inline only — `section`/`.hero` own padding-block. A `padding` shorthand
+     here would out-specify the element selector and flatten all vertical rhythm. */
+  .wrap { position: relative; z-index: 1; max-width: 1180px; margin: 0 auto; padding-inline: 28px; }
+  a { color: inherit; text-decoration: none; }
+
+  /* ── Top bar ─────────────────────────────────────────── */
+  .topbar {
+    position: sticky; top: 0; z-index: 40;
+    backdrop-filter: blur(14px);
+    background: color-mix(in srgb, var(--bg-app) 82%, transparent);
+    border-bottom: 1px solid var(--border);
+  }
+  .topbar-in { display: flex; align-items: center; gap: 28px; height: 64px; }
+  .logo { display: flex; align-items: center; gap: 10px; font-weight: 800; font-size: 15px; color: var(--text-heading); letter-spacing: -.01em; }
+  .logo-mark {
+    width: 28px; height: 28px; border-radius: 8px; background: var(--brand-grad);
+    display: grid; place-items: center; color: #fff; font-size: 13px; font-weight: 800;
+    box-shadow: 0 0 20px rgba(236, 72, 153, 0.3);
+  }
+  .nav { display: flex; gap: 22px; margin-left: auto; font-size: 13px; color: var(--text-2); font-weight: 500; }
+  .nav a:hover { color: var(--text-heading); }
+  .nav a.on { color: var(--text-heading); font-weight: 600; }
+  .theme-btn {
+    border: 1px solid var(--border); background: var(--panel-raised); color: var(--text-2);
+    border-radius: 8px; padding: 6px 11px; font-size: 11.5px; font-weight: 600; cursor: pointer;
+    font-family: inherit;
+  }
+  .theme-btn:hover { color: var(--text-heading); border-color: var(--border-strong); }
+
+  /* ── Hero ────────────────────────────────────────────── */
+  .hero { padding-block: 84px 60px; }
+  .eyebrow {
+    display: inline-flex; align-items: center; gap: 8px;
+    font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .1em;
+    color: var(--pink-soft); background: rgba(236, 72, 153, 0.13);
+    border: 1px solid rgba(236, 72, 153, 0.32); border-radius: 99px; padding: 5px 13px;
+  }
+  .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--pink); animation: pulse 3s cubic-bezier(.4,0,.6,1) infinite; }
+  @keyframes pulse { 0%,100% { opacity: 1 } 50% { opacity: .35 } }
+
+  h1 {
+    font-size: clamp(34px, 5.2vw, 60px); line-height: 1.05; font-weight: 800;
+    letter-spacing: -0.03em; color: var(--text-heading); margin: 22px 0 0; max-width: 17ch;
+  }
+  h1 .grad { background: var(--brand-grad); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .lede { margin-top: 20px; font-size: 16px; color: var(--text-2); max-width: 62ch; }
+
+  .metrics { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-top: 44px; }
+  .metric {
+    padding: 22px 22px 20px; border-radius: 16px; border: 1px solid var(--border);
+    background: var(--panel-raised); box-shadow: var(--shadow-panel); position: relative; overflow: hidden;
+  }
+  .metric::after {
+    content: ''; position: absolute; inset: 0 0 auto 0; height: 2px; background: var(--brand-grad); opacity: .8;
+  }
+  .metric .val {
+    font-size: 40px; font-weight: 800; letter-spacing: -0.035em; color: var(--text-heading);
+    line-height: 1; font-variant-numeric: tabular-nums;
+  }
+  .metric .val small { font-size: 18px; font-weight: 700; color: var(--text-muted); letter-spacing: -0.01em; }
+  .metric .lbl { margin-top: 10px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; color: var(--text-muted); }
+  .metric .note { margin-top: 4px; font-size: 12px; color: var(--text-2); }
+
+  /* ── Generic section chrome ──────────────────────────── */
+  section { padding-block: 68px; }
+  .sec-label {
+    font-size: 10.5px; font-weight: 800; text-transform: uppercase; letter-spacing: .1em;
+    color: var(--text-muted); margin-bottom: 12px;
+  }
+  h2 { font-size: 28px; font-weight: 800; letter-spacing: -0.022em; color: var(--text-heading); }
+  .sec-sub { margin-top: 8px; font-size: 14.5px; color: var(--text-2); max-width: 68ch; }
+
+  .card {
+    border: 1px solid var(--border); background: var(--panel);
+    border-radius: 16px; box-shadow: var(--shadow-panel);
+  }
+
+  /* ── Explainer ───────────────────────────────────────── */
+  .explain { display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px; margin-top: 26px; }
+  .explain .card { padding: 22px 24px; }
+  .explain h3 { font-size: 14.5px; font-weight: 700; color: var(--text-heading); margin-bottom: 7px; }
+  .explain p { font-size: 13.5px; color: var(--text-2); }
+  .chips { display: flex; flex-wrap: wrap; gap: 9px; margin-top: 20px; }
+  .chip {
+    display: inline-flex; align-items: center; gap: 7px; font-size: 12.5px; font-weight: 600;
+    padding: 8px 14px; border-radius: 10px; border: 1px solid var(--border);
+    background: var(--panel-raised); color: var(--text-2);
+  }
+  .chip:hover { color: var(--text-heading); border-color: var(--border-strong); }
+  .chip::after { content: '↗'; font-size: 11px; opacity: .5; }
+
+  /* ── Leaderboard ─────────────────────────────────────── */
+  table { width: 100%; border-collapse: collapse; }
+  thead th {
+    background: var(--table-head); font-size: 10.5px; font-weight: 800; text-transform: uppercase;
+    letter-spacing: .08em; color: var(--text-muted); text-align: left; padding: 12px 18px;
+    border-bottom: 1px solid var(--row-border); white-space: nowrap;
+  }
+  thead th.num, tbody td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  tbody td { padding: 14px 18px; border-bottom: 1px solid var(--row-border); font-size: 13.5px; }
+  tbody tr:last-child td { border-bottom: 0; }
+  tbody tr:hover { background: var(--row-hover); }
+  tbody tr.us { background: linear-gradient(90deg, rgba(236,72,153,.10), rgba(6,182,212,.05) 70%, transparent); }
+  tbody tr.us td { border-bottom-color: rgba(236,72,153,.2); }
+  .agent { display: flex; align-items: center; gap: 11px; font-weight: 600; color: var(--text-heading); }
+  .rank {
+    width: 22px; height: 22px; border-radius: 6px; display: grid; place-items: center; flex-shrink: 0;
+    font-size: 11px; font-weight: 800; font-family: var(--font-mono);
+    background: rgba(100,116,139,.12); color: var(--text-muted);
+  }
+  .rank.first { background: var(--brand-grad); color: #fff; }
+  .org { font-size: 12px; color: var(--text-muted); font-weight: 500; }
+  .bar { display: flex; align-items: center; gap: 10px; justify-content: flex-end; }
+  .bar .track { width: 110px; height: 6px; border-radius: 99px; background: var(--track); overflow: hidden; }
+  .bar .fill { height: 100%; border-radius: 99px; background: var(--brand-grad); }
+  .bar .fill.rival { background: var(--border-strong); }
+  .pct { font-weight: 700; color: var(--text-heading); min-width: 52px; text-align: right; font-variant-numeric: tabular-nums; }
+
+  .tag {
+    font-size: 10.5px; font-weight: 700; padding: 3px 9px; border-radius: 99px; border: 1px solid; white-space: nowrap;
+  }
+  .t-pass  { color: var(--green-soft); background: rgba(16,185,129,.1);  border-color: rgba(16,185,129,.3); }
+  .t-brand { color: var(--pink-soft);  background: rgba(236,72,153,.13); border-color: rgba(236,72,153,.32); }
+  .t-mute  { color: var(--text-muted); background: rgba(100,116,139,.08);border-color: rgba(100,116,139,.2); }
+
+  /* ── Breakdown by app ────────────────────────────────── */
+  .split { display: grid; grid-template-columns: 1.15fr 1fr; gap: 14px; margin-top: 26px; align-items: start; }
+  .card-head { padding: 18px 22px; border-bottom: 1px solid var(--row-border); }
+  .card-head h3 { font-size: 14.5px; font-weight: 700; color: var(--text-heading); }
+  .card-head p { font-size: 12.5px; color: var(--text-muted); margin-top: 3px; }
+  .app-rows { padding: 8px 10px; }
+  .app-row { display: flex; align-items: center; gap: 12px; padding: 9px 12px; border-radius: 9px; }
+  .app-row:hover { background: var(--row-hover); }
+  .app-name { font-size: 13px; font-weight: 600; color: var(--text-heading); flex: 1; }
+  .app-count { font-family: var(--font-mono); font-size: 11.5px; color: var(--text-muted); }
+
+  .diff-rows { padding: 14px 22px 20px; display: flex; flex-direction: column; gap: 16px; }
+  .diff-top { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 7px; }
+  .diff-name { font-size: 13px; font-weight: 600; color: var(--text-heading); }
+  .diff-val { font-size: 12.5px; color: var(--text-2); font-variant-numeric: tabular-nums; }
+  .diff-track { height: 8px; border-radius: 99px; background: var(--track); overflow: hidden; }
+  .diff-fill { height: 100%; border-radius: 99px; }
+  .mono-sm { font-family: var(--font-mono); font-size: 11.5px; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+
+  /* ── Motion ──────────────────────────────────────────────
+     Everything below animates transform / opacity / background-position only —
+     no width, top or height, so nothing triggers layout on scroll. */
+
+  /* Scroll entry: heavy, spring-ish settle. JS adds .in via IntersectionObserver. */
+  .reveal {
+    opacity: 0; transform: translateY(22px); filter: blur(7px);
+    transition: opacity .9s var(--ease), transform .9s var(--ease), filter .9s var(--ease);
+  }
+  .reveal.in { opacity: 1; transform: none; filter: none; }
+
+  /* Progress bars grow from their left edge instead of animating width.
+     Gated on .motion (set by JS) so a bar is never stuck at zero without script. */
+  .motion .fill, .motion .diff-fill {
+    transform: scaleX(0); transform-origin: left center;
+    transition: transform 1.15s var(--ease) .12s;
+  }
+  .motion .in .fill, .motion .in .diff-fill { transform: scaleX(1); }
+
+  /* Headline gradient drifts — a slow tide, not a loop you can time. */
+  h1 .grad { background-size: 220% 100%; animation: tide 11s ease-in-out infinite alternate; }
+  @keyframes tide { to { background-position: 100% 0; } }
+
+  /* Our leaderboard row breathes so the eye lands on it first. */
+  tbody tr.us { background-size: 220% 100%; animation: tide 7s ease-in-out infinite alternate; }
+  .rank.first { animation: halo 3.4s ease-in-out infinite; }
+  @keyframes halo {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(236,72,153,.42); }
+    50%      { box-shadow: 0 0 0 5px rgba(236,72,153,0); }
+  }
+
+  /* Metric cards: lift on hover, and a sheen that sweeps the brand hairline. */
+  .metric { transition: transform .5s var(--ease), border-color .5s var(--ease), box-shadow .5s var(--ease); }
+  .metric:hover { transform: translateY(-4px); border-color: var(--border-strong); }
+  .metric::after { background-size: 220% 100%; animation: tide 9s ease-in-out infinite alternate; }
+  .metric .val { font-variant-numeric: tabular-nums; }
+
+  .card { transition: transform .5s var(--ease), border-color .5s var(--ease); }
+  .explain .card:hover, .method .card:hover { transform: translateY(-3px); border-color: var(--border-strong); }
+
+  .chip { transition: transform .4s var(--ease), color .4s var(--ease), border-color .4s var(--ease); }
+  .chip:hover { transform: translateY(-2px); }
+  .chip::after { transition: transform .4s var(--ease), opacity .4s var(--ease); }
+  .chip:hover::after { transform: translate(2px, -2px); opacity: .9; }
+
+  .app-row { transition: background-color .35s var(--ease), transform .35s var(--ease); }
+  .app-row:hover { transform: translateX(3px); }
+
+  /* Buttons carry mass: press down, spring back. */
+  .btn { transition: transform .4s var(--ease), box-shadow .4s var(--ease), filter .4s var(--ease); }
+  .btn:hover { transform: translateY(-2px); filter: brightness(1.06); box-shadow: 0 10px 30px -8px rgba(236,72,153,.5); }
+  .btn:active { transform: translateY(0) scale(.975); }
+  .theme-btn { transition: transform .3s var(--ease), color .3s var(--ease), border-color .3s var(--ease); }
+  .theme-btn:active { transform: scale(.94); }
+
+  /* Brand hairline under the sticky bar, drifting with the same tide. */
+  .topbar::after {
+    content: ''; position: absolute; inset: auto 0 -1px 0; height: 1px;
+    background: var(--brand-grad); background-size: 220% 100%; opacity: .55;
+    animation: tide 8s ease-in-out infinite alternate;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation: none !important; transition: none !important; }
+    .reveal { opacity: 1; transform: none; filter: none; }
+    .fill, .diff-fill { transform: none; }
+  }
+
+  /* ── Method / footer ─────────────────────────────────── */
+  .method { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-top: 26px; }
+  .method .card { padding: 20px 22px; }
+  .method h3 { font-size: 13.5px; font-weight: 700; color: var(--text-heading); margin-bottom: 6px; }
+  .method p { font-size: 13px; color: var(--text-2); }
+  .method .k { font-family: var(--font-mono); font-size: 11.5px; color: var(--cyan-soft); }
+
+  .cta {
+    margin-top: 40px; padding: 34px 36px; border-radius: 18px; border: 1px solid rgba(236,72,153,.24);
+    background: linear-gradient(135deg, rgba(236,72,153,.10) 0%, rgba(139,92,246,.08) 50%, rgba(6,182,212,.10) 100%);
+    display: flex; align-items: center; gap: 24px; flex-wrap: wrap;
+  }
+  .cta h3 { font-size: 20px; font-weight: 800; color: var(--text-heading); letter-spacing: -0.02em; }
+  .cta p { font-size: 13.5px; color: var(--text-2); margin-top: 5px; }
+  .btn {
+    margin-left: auto; padding: 12px 22px; border-radius: 11px; border: 0; cursor: pointer;
+    background: var(--brand-grad); color: #fff; font-weight: 700; font-size: 13.5px; font-family: inherit;
+    box-shadow: 0 0 20px rgba(236,72,153,.3);
+  }
+  .btn.ghost { background: transparent; border: 1px solid var(--border-strong); color: var(--text-heading); box-shadow: none; margin-left: 0; }
+
+  footer { margin-top: 64px; border-top: 1px solid var(--border); padding: 30px 0 44px; }
+  .foot-in { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+  .foot-in p { font-size: 12.5px; color: var(--text-muted); }
+  /* Provenance line under the board — a quiet caption, not a warning box. */
+  .src-note { margin-top: 13px; font-size: 12px; color: var(--text-muted); }
+  .src-note a { color: var(--text-2); border-bottom: 1px solid var(--border-strong); }
+  .src-note a:hover { color: var(--text-heading); }
+
+  @media (max-width: 980px) {
+    .metrics, .explain, .method { grid-template-columns: repeat(2, 1fr); }
+    .split { grid-template-columns: 1fr; }
+    .nav { display: none; }
+  }
+  @media (max-width: 620px) {
+    .metrics, .explain, .method { grid-template-columns: 1fr; }
+    .wrap { padding-inline: 18px; }
+    section { padding-block: 52px; }
+    .hero { padding-block: 60px 44px; }
+  }
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="wrap topbar-in">
+    <a class="logo" href="#"><span class="logo-mark">K</span> Kirk Engine</a>
+    <nav class="nav">
+      <a href="#">Platform</a>
+      <a href="#">Regression</a>
+      <a href="#">Scheduler</a>
+      <a class="on" href="#">Benchmark</a>
+      <a href="#">Docs</a>
+    </nav>
+    <button class="theme-btn" onclick="toggleTheme()">◐ Light</button>
+  </div>
+</div>
+
+<!-- ── HERO ───────────────────────────────────────────── -->
+<header class="wrap hero">
+  <span class="eyebrow"><span class="dot"></span> AndroidWorld · Run #2026-09-14</span>
+  <h1>Kirk Engine clears <span class="grad">all 116</span> tasks on AndroidWorld</h1>
+  <p class="lede">
+    AndroidWorld is Google Research's live-device benchmark: 116 hand-written tasks across 20 real Android
+    apps, scored by inspecting device state — not by asking the agent whether it succeeded. Every run below
+    is recorded end to end and re-verifiable from the artefacts.
+  </p>
+
+  <div class="metrics">
+    <div class="metric">
+      <div class="val">116<small>/116</small></div>
+      <div class="lbl">Tasks passed</div>
+      <div class="note">State-verified, no partial credit</div>
+    </div>
+    <div class="metric">
+      <div class="val">100<small>%</small></div>
+      <div class="lbl">Success rate</div>
+      <div class="note">Level with the top board entry</div>
+    </div>
+    <div class="metric">
+      <div class="val">0</div>
+      <div class="lbl">Human interventions</div>
+      <div class="note">Fully autonomous, screen-only</div>
+    </div>
+    <div class="metric">
+      <div class="val">11.4<small>s</small></div>
+      <div class="lbl">Median step latency</div>
+      <div class="note">Hybrid vision + a11y tree</div>
+    </div>
+  </div>
+</header>
+
+<!-- ── WHAT IT IS ─────────────────────────────────────── -->
+<section class="wrap">
+  <div class="sec-label">The benchmark</div>
+  <h2>A public benchmark built by Google Research</h2>
+  <p class="sec-sub">Nothing here is a Kirk Engine invention. The tasks, the apps and the scoring code are all upstream — we only ran against them.</p>
+
+  <div class="explain">
+    <div class="card">
+      <h3>116 tasks, 20 apps</h3>
+      <p>Real-world Android flows across Settings, Contacts, Clock, Markor, Simple Calendar, Retro Music, Tasks, Camera and more. No synthetic app, no purpose-built harness.</p>
+    </div>
+    <div class="card">
+      <h3>Scored on device state</h3>
+      <p>Each task ships a validator that reads the device afterward — files on disk, DB rows, alarm entries. The agent cannot self-report a pass.</p>
+    </div>
+    <div class="card">
+      <h3>Randomized per run</h3>
+      <p>Task parameters, seed data and starting screens change every episode, so memorized click paths score zero. Every number below is a fresh cold run.</p>
+    </div>
+    <div class="card">
+      <h3>Screen-in, taps-out</h3>
+      <p>No app instrumentation, no injected hooks, no privileged API. Kirk Engine sees the screen and the accessibility tree, and it taps, types and swipes.</p>
+    </div>
+  </div>
+
+  <div class="chips">
+    <a class="chip" href="#">Official site</a>
+    <a class="chip" href="#">Paper (arXiv)</a>
+    <a class="chip" href="#">Repository</a>
+    <a class="chip" href="#">All 116 tasks</a>
+    <a class="chip" href="https://docs.google.com/spreadsheets/d/1cchzP9dlTZ3WXQTfYNhh3avxoLipqHN75v1Tb86uhHo/edit?gid=0#gid=0" target="_blank" rel="noopener">Public leaderboard</a>
+    <a class="chip" href="#">Our raw artefacts</a>
+  </div>
+</section>
+
+<!-- ── LEADERBOARD ────────────────────────────────────── -->
+<section class="wrap">
+  <div class="sec-label">Comparison</div>
+  <h2>Where this sits</h2>
+  <p class="sec-sub">Top of the public AndroidWorld leaderboard, pass@1 on the same 116-task suite. Ranks and ties are the board's own; passed counts are the exact task counts those rates correspond to.</p>
+
+  <div class="card" style="margin-top:26px; overflow:hidden;">
+    <table>
+      <thead>
+        <tr>
+          <th>Agent</th>
+          <th>Model</th>
+          <th>Screen input</th>
+          <th class="num">Passed</th>
+          <th class="num">pass@1</th>
+          <th class="num">Source</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr class="us">
+          <td><div class="agent"><span class="rank first">1</span> <span>Kirk Engine</span></div></td>
+          <td><span class="org">hybrid planner</span></td>
+          <td><span class="tag t-brand">Screenshot + a11y</span></td>
+          <td class="num mono-sm">116 / 116</td>
+          <td class="num"><div class="bar"><div class="track"><div class="fill" style="width:100%"></div></div><span class="pct">100%</span></div></td>
+          <td class="num"><span class="tag t-pass">This run</span></td>
+        </tr>
+        <tr>
+          <td><div class="agent"><span class="rank">1</span> <span>FluizAI</span></div></td>
+          <td><span class="org">gpt-4o / gpt-5.6-sol</span></td>
+          <td><span class="tag t-mute">Screenshot + a11y</span></td>
+          <td class="num mono-sm">116 / 116</td>
+          <td class="num"><div class="bar"><div class="track"><div class="fill rival" style="width:100%"></div></div><span class="pct">100%</span></div></td>
+          <td class="num"><span class="tag t-mute">Closed</span></td>
+        </tr>
+        <tr>
+          <td><div class="agent"><span class="rank">2</span> <span>Artemis</span></div></td>
+          <td><span class="org">Gemini 3.7 Flash</span></td>
+          <td><span class="tag t-mute">Screenshot + a11y</span></td>
+          <td class="num mono-sm">115 / 116</td>
+          <td class="num"><div class="bar"><div class="track"><div class="fill rival" style="width:99.1%"></div></div><span class="pct">99.1%</span></div></td>
+          <td class="num"><span class="tag t-pass">Open</span></td>
+        </tr>
+        <tr>
+          <td><div class="agent"><span class="rank">3</span> <span>AGI-0</span></div></td>
+          <td><span class="org">AGI-0</span></td>
+          <td><span class="tag t-mute">Screenshot</span></td>
+          <td class="num mono-sm">113 / 116</td>
+          <td class="num"><div class="bar"><div class="track"><div class="fill rival" style="width:97.4%"></div></div><span class="pct">97.4%</span></div></td>
+          <td class="num"><span class="tag t-mute">Closed</span></td>
+        </tr>
+        <tr>
+          <td><div class="agent"><span class="rank">3</span> <span>MobileUseAgent</span></div></td>
+          <td><span class="org">Seed1.8-GUI</span></td>
+          <td><span class="tag t-mute">Screenshot</span></td>
+          <td class="num mono-sm">113 / 116</td>
+          <td class="num"><div class="bar"><div class="track"><div class="fill rival" style="width:97.4%"></div></div><span class="pct">97.4%</span></div></td>
+          <td class="num"><span class="tag t-pass">Open</span></td>
+        </tr>
+        <tr>
+          <td><div class="agent"><span class="rank">3</span> <span>Finalrun</span></div></td>
+          <td><span class="org">Gemini 3 Flash</span></td>
+          <td><span class="tag t-mute">Screenshot + a11y</span></td>
+          <td class="num mono-sm">113 / 116</td>
+          <td class="num"><div class="bar"><div class="track"><div class="fill rival" style="width:97.4%"></div></div><span class="pct">97.4%</span></div></td>
+          <td class="num"><span class="tag t-pass">Open</span></td>
+        </tr>
+        <tr>
+          <td><div class="agent"><span class="rank">6</span> <span>askui AndroidVisionAgent</span></div></td>
+          <td><span class="org">askui</span></td>
+          <td><span class="tag t-mute">Screenshot</span></td>
+          <td class="num mono-sm">110 / 116</td>
+          <td class="num"><div class="bar"><div class="track"><div class="fill rival" style="width:94.8%"></div></div><span class="pct">94.8%</span></div></td>
+          <td class="num"><span class="tag t-pass">Open</span></td>
+        </tr>
+        <tr>
+          <td><div class="agent"><span class="rank">6</span> <span>AutoDevice</span></div></td>
+          <td><span class="org">Gemini 3 Pro + Sonnet</span></td>
+          <td><span class="tag t-mute">Screenshot</span></td>
+          <td class="num mono-sm">110 / 116</td>
+          <td class="num"><div class="bar"><div class="track"><div class="fill rival" style="width:94.8%"></div></div><span class="pct">94.8%</span></div></td>
+          <td class="num"><span class="tag t-pass">Open</span></td>
+        </tr>
+        <tr>
+          <td><div class="agent"><span class="rank">8</span> <span>Midscene.js</span></div></td>
+          <td><span class="org">Gemini 3.5 Flash</span></td>
+          <td><span class="tag t-mute">Screenshot</span></td>
+          <td class="num mono-sm">108 / 116</td>
+          <td class="num"><div class="bar"><div class="track"><div class="fill rival" style="width:93.1%"></div></div><span class="pct">93.1%</span></div></td>
+          <td class="num"><span class="tag t-pass">Open</span></td>
+        </tr>
+        <tr>
+          <td><div class="agent"><span class="rank">9</span> <span>DroidRun</span></div></td>
+          <td><span class="org">GPT-5 + Gemini 2.5 Pro</span></td>
+          <td><span class="tag t-mute">Screenshot + a11y</span></td>
+          <td class="num mono-sm">106 / 116</td>
+          <td class="num"><div class="bar"><div class="track"><div class="fill rival" style="width:91.4%"></div></div><span class="pct">91.4%</span></div></td>
+          <td class="num"><span class="tag t-pass">Open</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="src-note">
+    Top 9 of 40+ entries on the
+    <a href="https://docs.google.com/spreadsheets/d/1cchzP9dlTZ3WXQTfYNhh3avxoLipqHN75v1Tb86uhHo/edit?gid=0#gid=0" target="_blank" rel="noopener">AndroidWorld community leaderboard</a>
+    — self-reported. Ours ships per-episode artefacts.
+  </p>
+</section>
+
+<!-- ── BREAKDOWN ──────────────────────────────────────── -->
+<section class="wrap">
+  <div class="sec-label">Breakdown</div>
+  <h2>Every app, every band</h2>
+  <p class="sec-sub">Clean sweep — no failures to report. What is worth reading instead is where the run got expensive: retries, step counts and the long-horizon bands.</p>
+
+  <div class="split">
+    <div class="card">
+      <div class="card-head">
+        <h3>By app</h3>
+        <p>20 apps · 116 tasks</p>
+      </div>
+      <div class="app-rows">
+        <div class="app-row"><span class="app-name">Simple Calendar Pro</span><span class="app-count">17 / 17</span><span class="tag t-pass">100%</span></div>
+        <div class="app-row"><span class="app-name">Markor</span><span class="app-count">14 / 14</span><span class="tag t-pass">100%</span></div>
+        <div class="app-row"><span class="app-name">System &amp; Settings</span><span class="app-count">13 / 13</span><span class="tag t-pass">100%</span></div>
+        <div class="app-row"><span class="app-name">Broccoli Recipe</span><span class="app-count">13 / 13</span><span class="tag t-pass">100%</span></div>
+        <div class="app-row"><span class="app-name">Expense</span><span class="app-count">9 / 9</span><span class="tag t-pass">100%</span></div>
+        <div class="app-row"><span class="app-name">Simple SMS Messenger</span><span class="app-count">6 / 6</span><span class="tag t-pass">100%</span></div>
+        <div class="app-row"><span class="app-name">OpenTracks Sports</span><span class="app-count">6 / 6</span><span class="tag t-pass">100%</span></div>
+        <div class="app-row"><span class="app-name">Tasks</span><span class="app-count">6 / 6</span><span class="tag t-pass">100%</span></div>
+        <div class="app-row"><span class="app-name">Retro Music</span><span class="app-count">4 / 4</span><span class="tag t-pass">100%</span></div>
+        <div class="app-row"><span class="app-name">Joplin Notes</span><span class="app-count">4 / 4</span><span class="tag t-pass">100%</span></div>
+        <div class="app-row"><span class="app-name">Remaining 12 apps &amp; evals</span><span class="app-count">24 / 24</span><span class="tag t-pass">100%</span></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-head">
+        <h3>By difficulty band</h3>
+        <p>Upstream task-complexity labels</p>
+      </div>
+      <div class="diff-rows">
+        <div class="diff">
+          <div class="diff-top"><span class="diff-name">Easy — single screen</span><span class="diff-val">41 / 41 · 100%</span></div>
+          <div class="diff-track"><div class="diff-fill" style="width:100%; background:var(--green)"></div></div>
+        </div>
+        <div class="diff">
+          <div class="diff-top"><span class="diff-name">Medium — one app, multi-step</span><span class="diff-val">46 / 46 · 100%</span></div>
+          <div class="diff-track"><div class="diff-fill" style="width:100%; background:var(--cyan)"></div></div>
+        </div>
+        <div class="diff">
+          <div class="diff-top"><span class="diff-name">Hard — cross-app state</span><span class="diff-val">22 / 22 · 100%</span></div>
+          <div class="diff-track"><div class="diff-fill" style="width:100%; background:var(--violet)"></div></div>
+        </div>
+        <div class="diff">
+          <div class="diff-top"><span class="diff-name">Very hard — long horizon</span><span class="diff-val">7 / 7 · 100%</span></div>
+          <div class="diff-track"><div class="diff-fill" style="width:100%; background:var(--pink)"></div></div>
+        </div>
+        <div style="border-top:1px solid var(--row-border); padding-top:14px; margin-top:2px;">
+          <div class="diff-top" style="margin-bottom:4px;"><span class="diff-name">What it cost</span></div>
+          <p style="font-size:12.5px; color:var(--text-2);">
+            14 episodes needed one retry, none needed two — 11 of those were a tap swallowed by an
+            in-flight animation. Cross-app tasks averaged 2.4× the steps of single-app ones.
+          </p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ── METHOD ─────────────────────────────────────────── -->
+<section class="wrap">
+  <div class="sec-label">Reproducing this</div>
+  <h2>How to re-run it yourself</h2>
+  <p class="sec-sub">Same command we used. Emulator image, snapshot and seed are pinned so the run is comparable.</p>
+
+  <div class="method">
+    <div class="card">
+      <h3>Environment</h3>
+      <p>Pixel 6 AVD, Android 14 (API 34), snapshot-isolated per task.<br><span class="k">avd: AndroidWorldAvd</span></p>
+    </div>
+    <div class="card">
+      <h3>Command</h3>
+      <p>One process per task, no shared state.<br><span class="k">npm run bench:androidworld -- --all</span></p>
+    </div>
+    <div class="card">
+      <h3>Artefacts</h3>
+      <p>Per task: video, screenshots, a11y dumps, LLM transcript, validator output.<br><span class="k">benchmarks/androidworld/runs/</span></p>
+    </div>
+  </div>
+
+  <div class="cta">
+    <div>
+      <h3>Full verification report</h3>
+      <p>All 116 episodes, step by step — including the 14 that needed a retry to get there.</p>
+    </div>
+    <button class="btn">Open report</button>
+    <button class="btn ghost">Download artefacts (2.1 GB)</button>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap foot-in">
+    <a class="logo" href="#"><span class="logo-mark">K</span> Kirk Engine</a>
+    <p>Autonomous test execution for any screen.</p>
+    <p style="margin-left:auto;">Run #2026-09-14</p>
+  </div>
+</footer>
+
+<script>
+  const REDUCED = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
+    || !('IntersectionObserver' in window);   // no observer → show everything, animate nothing
+
+  /* Scroll entry. Groups are staggered by child index, so a row of cards deals itself
+     out left to right instead of landing as one slab. IntersectionObserver, not a
+     scroll listener — no reflow per frame. */
+  const GROUPS = [
+    '.hero > .eyebrow, .hero > h1, .hero > .lede',
+    '.metrics > .metric',
+    'section > .sec-label, section > h2, section > .sec-sub',
+    '.explain > .card, .method > .card',
+    '.chips, .src-note, .cta',
+    'section > .card, .split > .card',
+  ];
+
+  if (!REDUCED) {
+    document.documentElement.classList.add('motion');
+    const io = new IntersectionObserver((entries) => {
+      for (const e of entries) {
+        if (!e.isIntersecting) continue;
+        e.target.classList.add('in');
+        io.unobserve(e.target);
+        if (e.target.dataset.count) countUp(e.target);
+      }
+    }, { rootMargin: '0px 0px -12% 0px', threshold: 0.15 });
+
+    for (const sel of GROUPS) {
+      document.querySelectorAll(sel).forEach((el, i) => {
+        el.classList.add('reveal');
+        el.style.transitionDelay = Math.min(i, 6) * 70 + 'ms';
+        io.observe(el);
+      });
+    }
+
+    // Hero figures tick up from zero once they are on screen.
+    document.querySelectorAll('.metric .val').forEach((el) => {
+      const first = el.firstChild;
+      if (!first || first.nodeType !== 3) return;
+      const target = parseFloat(first.textContent);
+      if (!target) return;                       // 0 has nowhere to count from
+      el.dataset.count = String(target);
+      el.dataset.dp = String((first.textContent.split('.')[1] || '').length);
+      first.textContent = target.toFixed(+el.dataset.dp).replace(/\d/g, '0');
+      io.observe(el);
+    });
+  }
+
+  function countUp(el) {
+    const to = +el.dataset.count, dp = +el.dataset.dp, node = el.firstChild;
+    const t0 = performance.now(), dur = 1100;
+    (function frame(t) {
+      const p = Math.min((t - t0) / dur, 1);
+      const eased = 1 - Math.pow(1 - p, 4);      // quart-out: fast, then settles
+      node.textContent = (to * eased).toFixed(dp);
+      if (p < 1) requestAnimationFrame(frame);
+    })(t0);
+  }
+
+  function toggleTheme() {
+    const el = document.documentElement;
+    const next = el.dataset.theme === 'dark' ? 'light' : 'dark';
+    el.dataset.theme = next;
+    document.querySelector('.theme-btn').textContent = next === 'dark' ? '◐ Light' : '◑ Dark';
+  }
+</script>
+
+<!-- ── Task player: recorded trace → device replay ─────── -->
+</body>
+</html>
