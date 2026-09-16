@@ -195,7 +195,7 @@ pass@1 on the same 116-task suite. Ranks and ties are the board's own.
 
 | Rank | Agent | Model | Screen input | Passed | pass@1 |
 |---|---|---|---|---|---|
-| **1** | **Kirk Engine** | hybrid planner | Screenshot + a11y | **116 / 116** | **100%** |
+| **1** | **Kirk Engine** | gpt-4o / gpt-5.4 | Screenshot + a11y | **116 / 116** | **100%** |
 | 1 | FluizAI | gpt-4o / gpt-5.6-sol | Screenshot + a11y | 116 / 116 | 100% |
 | 2 | Artemis | Gemini 3.7 Flash | Screenshot + a11y | 115 / 116 | 99.1% |
 | 3 | AGI-0 | AGI-0 | Screenshot | 113 / 116 | 97.4% |
